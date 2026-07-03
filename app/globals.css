@@ -36,7 +36,8 @@ button {
 .feed {
   height: 100dvh;
   width: 100%;
-  max-width: 480px;
+  /* keep narrow: >=480px flips TikTok's embed into its cluttered desktop layout */
+  max-width: 420px;
   margin: 0 auto;
   overflow-y: scroll;
   scroll-snap-type: y mandatory;
@@ -144,7 +145,7 @@ button {
   left: 50%;
   transform: translateX(-50%);
   width: 100%;
-  max-width: 480px;
+  max-width: 420px;
   z-index: 10;
   display: flex;
   gap: 8px;
@@ -184,7 +185,7 @@ button {
   gap: 16px;
   text-align: center;
   padding: 24px;
-  max-width: 480px;
+  max-width: 420px;
   margin: 0 auto;
 }
 .center-state h2 {
@@ -213,7 +214,7 @@ button {
 
 /* ---- Settings / onboarding ---- */
 .page {
-  max-width: 480px;
+  max-width: 420px;
   margin: 0 auto;
   padding: 20px 16px 60px;
 }

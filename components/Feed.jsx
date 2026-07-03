@@ -127,6 +127,22 @@ export default function Feed() {
     }
   }, [active, mode, state, videos.length]);
 
+  // Arrow Up/Down (+ PageUp/Down, Space) navigate between videos.
+  useEffect(() => {
+    function onKey(e) {
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) return;
+      const dir = (e.key === "ArrowDown" || e.key === "PageDown" || e.key === " ") ? 1
+        : (e.key === "ArrowUp" || e.key === "PageUp") ? -1 : 0;
+      if (!dir) return;
+      e.preventDefault();
+      const target = document.querySelector(`[data-slide="${active + dir}"]`);
+      target?.scrollIntoView({ behavior: "smooth" });
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active]);
+
   if (state === "loading") {
     return <div className="center-state"><p>Loading your feed…</p></div>;
   }
@@ -170,7 +186,6 @@ export default function Feed() {
           const near = i >= active - PRELOAD_BEHIND && i <= active + PRELOAD_AHEAD;
           return (
             <div className="slide" data-slide={i} key={v.id}>
-              <span className="badge-source">{v.source}</span>
               <button
                 className="mute-btn"
                 onClick={() => setMuted((m) => !m)}
@@ -195,10 +210,14 @@ export default function Feed() {
                 />
               )}
 
-              <div className="overlay">
-                {v.topic && <span className="topic">{v.topic}</span>}
-                <p className="title">{v.title}</p>
-              </div>
+              {/* TikTok's player already shows title/author/likes — only add our
+                  overlay for YouTube/demo sources so we don't double up. */}
+              {v.source !== "tiktok" && (
+                <div className="overlay">
+                  {v.topic && <span className="topic">{v.topic}</span>}
+                  <p className="title">{v.title}</p>
+                </div>
+              )}
             </div>
           );
         })}

@@ -96,10 +96,15 @@
    ============================================================ */
 
 const DEFAULTS=["psychology","science","tech","self-improvement","history"];
-const QUIZ={ // demo quiz bank (real app generates with Gemini). OFF by default.
+const QUIZ={ // demo quiz bank (real app generates per-video with Gemini). OFF by default.
   psychology:{q:"'Reading' someone from tiny behaviors is unreliable because…",a:["behavior is noisy and context-dependent","people never lie","body language is a language","psychologists say so"],c:0},
   science:{q:"Good science communication should mostly…",a:["state facts without evidence","explain the reasoning and evidence","use complex jargon","avoid numbers"],c:1},
+  tech:{q:"A hash function is mainly used to…",a:["encrypt reversible data","map data to a fixed-size fingerprint","compress video","speed up the CPU"],c:1},
+  "self-improvement":{q:"The '2-minute rule' for habits says to…",a:["quit after 2 minutes","start a habit so small it takes ~2 min","meditate 2 minutes","sleep 2 hours more"],c:1},
+  history:{q:"Why is primary-source evidence valued in history?",a:["it's always unbiased","it's from the time/place studied","it's easier to read","it's more recent"],c:1},
 };
+// Generic fallback so the quiz works for ANY topic during the demo.
+const QUIZ_FALLBACK={q:"What's the point of a quick post-video quiz?",a:["to pad watch time","to check you actually retained the idea","to sell ads","to rank creators"],c:1};
 
 /* ---------- state ---------- */
 const KEY="learnfeed.v3";
@@ -265,13 +270,18 @@ function topbar(){
     s.oninput=e=>{searchQuery=e.target.value;clearTimeout(searchT);searchT=setTimeout(runSearch,350)};
     bar.appendChild(s);
     const x=document.createElement("button");x.className="iconbtn";x.textContent="✕";
-    x.onclick=()=>{searchOpen=false;searchMode=false;searchQuery="";render()};
+    x.onclick=()=>{const wasSearch=searchMode;searchOpen=false;searchMode=false;searchQuery="";
+      if(wasSearch)render();                 // restore rotation feed after results
+      else bar.replaceWith(topbar());        // just close the box, keep video playing
+    };
     bar.appendChild(x);
     setTimeout(()=>s.focus(),0);
     return bar;
   }
   const c=document.createElement("div");c.className="controls";
-  const search=iconBtn("🔍",()=>{searchOpen=true;render()});
+  // open search by swapping just the control cluster — don't re-render the feed
+  // (that would restart the current video).
+  const search=iconBtn("🔍",()=>{searchOpen=true;c.replaceWith(topbar())});
   const snd=iconBtn(soundOn?"🔊":"🔇",()=>{
     // toggle audio WITHOUT re-rendering (that would restart the current video)
     if(soundOn){soundOn=false;const f=activeEl&&activeEl.querySelector("iframe.embed");if(f)ttCmd(f,"mute");}
@@ -339,7 +349,7 @@ function finish(el,ended){
 function maybeQuiz(v){
   if(!state.quizEnabled)return;
   if(Object.keys(state.watched).length%5!==0)return;
-  const q=QUIZ[v.topic.toLowerCase()];if(!q)return;
+  const q=QUIZ[v.topic.toLowerCase()]||QUIZ_FALLBACK; // never skip a video
   quizState={q};render();
 }
 
@@ -385,7 +395,8 @@ function settingsSheet(){
   const shares=topicShares();
   state.interests.forEach(it=>{
     const r=document.createElement("div");r.className="irow";
-    const share=shares[it.name]!=null?shares[it.name]+"% of feed":"off";
+    const nvids=videosFor(it.name).length;
+    const share=nvids===0?"no videos yet":(shares[it.name]!=null?shares[it.name]+"% of feed":"off");
     const arrow=it.trend==="up"?"▲":it.trend==="down"?"▼":"·";
     r.innerHTML=`<div class="info"><div class="nm">${esc(it.name)}</div><div class="wt">${share}</div></div>`
       +`<span class="trend ${it.trend||''}">${arrow}</span>`;
