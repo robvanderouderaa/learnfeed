@@ -333,7 +333,11 @@ window.addEventListener("message",e=>{
   const d=e.data;if(!d||d["x-tiktok-player"]!==true||!activeEl)return;
   const f=activeEl.querySelector("iframe.embed");
   if(!f||e.source!==f.contentWindow)return;
-  if(d.type==="onCurrentTime"&&d.value){
+  if(d.type==="onPlayerReady"){
+    // start it the moment the player is ready (retries may fire too early)
+    ttCmd(f,"play");
+    if(soundOn){ttCmd(f,"unMute");ttCmd(f,"setVolume",100)}else{ttCmd(f,"mute")}
+  }else if(d.type==="onCurrentTime"&&d.value){
     activeEl._ct=Math.max(activeEl._ct||0,d.value.currentTime||0);
     if(d.value.duration)activeEl._dur=d.value.duration;
   }else if(d.type==="onStateChange"&&d.value===0){
@@ -356,20 +360,37 @@ function maybeQuiz(v){
 }
 
 let activeEl=null;
+// Make a slide the active one: mount its player, auto-play it, mark it seen,
+// and stop every other video. Used by BOTH the scroll handler and the observer.
+function activate(el){
+  if(!el||el===activeEl)return;
+  if(activeEl)finish(activeEl,false);
+  activeEl=el;activeEl._reported=false;activeEl._ct=0;activeEl._ended=false;
+  if(activeEl._v){state.seen[activeEl._v.id]=1;save();} // never show this one again
+  stopOthers(activeEl);
+  mount(activeEl,activeEl._v);
+  pushAudio(activeEl);
+}
 function observe(root){
-  const obs=new IntersectionObserver(es=>{
-    es.forEach(e=>{
-      if(e.isIntersecting&&e.intersectionRatio>0.6){
-        if(activeEl&&activeEl!==e.target)finish(activeEl,false);
-        activeEl=e.target;activeEl._reported=false;activeEl._ct=0;activeEl._ended=false;
-        if(activeEl._v){state.seen[activeEl._v.id]=1;save();} // never show this one again
-        stopOthers(activeEl);       // kill any other video's audio
-        mount(activeEl,activeEl._v); // auto-load the video that's in view
-        pushAudio(activeEl);        // unmute it if sound is enabled
-      }
+  // Primary: scroll position decides the active slide. Deterministic and
+  // reliable on mobile snap-scroll (IntersectionObserver can miss there).
+  let raf=null;
+  root.addEventListener("scroll",()=>{
+    if(raf)return;
+    raf=requestAnimationFrame(()=>{raf=null;
+      const h=root.clientHeight||1;
+      const idx=Math.round(root.scrollTop/h);
+      const el=root.querySelectorAll(".slide")[idx];
+      if(el)activate(el);
     });
+  },{passive:true});
+  // Backup: IntersectionObserver for cases scroll events don't cover.
+  const obs=new IntersectionObserver(es=>{
+    es.forEach(e=>{if(e.isIntersecting&&e.intersectionRatio>0.6)activate(e.target)});
   },{root,threshold:[0.6]});
   root.querySelectorAll(".slide").forEach(s=>obs.observe(s));
+  // Activate the first slide immediately so it plays without any scroll/tap.
+  activate(root.querySelector(".slide"));
 }
 
 function emptyState(){
