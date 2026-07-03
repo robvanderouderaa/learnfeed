@@ -115,9 +115,10 @@ if(!state.interests){
   // priority is a 0-100 "weight" that auto-moves on watch/skip and sets each
   // topic's share of the feed. locked = pin the weight (feedback ignored).
   state.interests=DEFAULTS.map(n=>({name:n,priority:50,locked:false,trend:null}));
-  state.watched={};state.skipped={};state.streaks={};state.tagCounts={};
+  state.watched={};state.skipped={};state.streaks={};state.tagCounts={};state.seen={};
   state.rank=1000;state.quizEnabled=false;state.muted=true;save();
 }
+state.seen=state.seen||{}; // videos already shown — never surface them again
 const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
 
 /* ---------- audio ----------
@@ -137,7 +138,8 @@ function pushAudio(el){
   const f=el&&el.querySelector("iframe.embed");if(!f)return;
   [150,600,1400,2600].forEach(t=>setTimeout(()=>{
     if(el!==activeEl)return;
-    if(soundOn){ttCmd(f,"unMute");ttCmd(f,"setVolume",100);ttCmd(f,"play")}else{ttCmd(f,"mute")}
+    ttCmd(f,"play"); // ALWAYS auto-play (muted autoplay is allowed on mobile)
+    if(soundOn){ttCmd(f,"unMute");ttCmd(f,"setVolume",100)}else{ttCmd(f,"mute")}
   },t));
 }
 // Hard-stop a slide's audio: pause AND remove the iframe so nothing keeps
@@ -175,7 +177,7 @@ function adjust(name,d,dir){
 function buildFeed(){
   const pools=state.interests
     .filter(i=>i.priority>0)
-    .map(it=>({it,rows:videosFor(it.name).filter(v=>!state.watched[v.id]&&!state.skipped[v.id]),idx:0}))
+    .map(it=>({it,rows:videosFor(it.name).filter(v=>!state.seen[v.id]&&!state.watched[v.id]&&!state.skipped[v.id]),idx:0}))
     .filter(p=>p.rows.length);
   if(!pools.length)return[];
   const credits=pools.map(()=>0),out=[];
@@ -360,6 +362,7 @@ function observe(root){
       if(e.isIntersecting&&e.intersectionRatio>0.6){
         if(activeEl&&activeEl!==e.target)finish(activeEl,false);
         activeEl=e.target;activeEl._reported=false;activeEl._ct=0;activeEl._ended=false;
+        if(activeEl._v){state.seen[activeEl._v.id]=1;save();} // never show this one again
         stopOthers(activeEl);       // kill any other video's audio
         mount(activeEl,activeEl._v); // auto-load the video that's in view
         pushAudio(activeEl);        // unmute it if sound is enabled
@@ -436,6 +439,16 @@ function settingsSheet(){
   qr.appendChild(qt);s3.appendChild(qr);
   const rk=document.createElement("p");rk.className="muted";rk.textContent="Rank "+state.rank+" · "+tier(state.rank);s3.appendChild(rk);
   p.appendChild(s3);
+
+  // Small library — let the user replay everything once they've seen it all.
+  const s4=sec("History");
+  const seenN=Object.keys(state.seen||{}).length;
+  const rr=document.createElement("div");rr.className="row";
+  rr.innerHTML=`<div><div>Seen videos</div><small>${seenN} watched & hidden from your feed</small></div>`;
+  const rb=document.createElement("button");rb.className="btn sec";rb.textContent="Replay all";
+  rb.onclick=()=>{state.seen={};state.watched={};state.skipped={};save();sh.classList.remove("open");render();};
+  rr.appendChild(rb);s4.appendChild(rr);
+  p.appendChild(s4);
 
   const foot=document.createElement("p");foot.className="muted";foot.style.marginTop="24px";
   foot.innerHTML='Real TikToks scraped per interest. Full app (live scraper + YouTube fallback + Gemini quiz) in the <a href="https://github.com/robvanderouderaa/learnfeed">repo</a>.';
