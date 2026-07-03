@@ -14,6 +14,7 @@ Usage:    python tiktok_search.py "psychology facts" 25
 """
 import asyncio
 import json
+import os
 import sys
 
 
@@ -26,10 +27,18 @@ async def main():
 
     from TikTokApi import TikTokApi  # imported late so import errors -> stderr
 
+    ms_token = os.environ.get("MS_TOKEN")
     out = []
     async with TikTokApi() as api:
-        await api.create_sessions(num_sessions=1, sleep_after=3)
-        async for video in api.search.videos(query, count=count):
+        await api.create_sessions(
+            num_sessions=1,
+            sleep_after=3,
+            headless=True,
+            ms_tokens=[ms_token] if ms_token else None,
+            browser=os.environ.get("TIKTOK_BROWSER", "chromium"),
+        )
+        # v7 keyword search: obj_type "item" returns videos.
+        async for video in api.search.search_type(query, "item", count=count):
             d = video.as_dict
             stats = d.get("video", {}) or {}
             out.append(

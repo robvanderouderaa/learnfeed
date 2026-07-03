@@ -210,42 +210,11 @@ function YouTubePlayer({ video, active, muted, onReport, onUnavailable }) {
   );
 }
 
-function TikTokPlayer({ video, active, onReport, onUnavailable }) {
-  const [html, setHtml] = useState(null);
+function TikTokPlayer({ video, active, onReport }) {
   const startRef = useRef(null);
   const watchedRef = useRef(0);
   const report = useReporter(onReport);
   const rawId = video.id.replace(/^tt_/, "");
-
-  // Fetch the oEmbed HTML (needs the canonical video URL, which the scraper
-  // stored on the row). Falls back to skipping on failure.
-  useEffect(() => {
-    let cancelled = false;
-    const url = video.url;
-    fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => {
-        if (!cancelled) setHtml(data.html);
-      })
-      .catch(() => onUnavailable?.());
-    return () => {
-      cancelled = true;
-    };
-  }, [video.url, onUnavailable]);
-
-  // Load TikTok's embed script after injecting the blockquote.
-  useEffect(() => {
-    if (!html) return;
-    if (window.tiktokEmbedLoaded) {
-      window.tiktokEmbed?.lib?.render?.();
-      return;
-    }
-    const s = document.createElement("script");
-    s.src = "https://www.tiktok.com/embed.js";
-    s.async = true;
-    document.body.appendChild(s);
-    window.tiktokEmbedLoaded = true;
-  }, [html]);
 
   // Approximate watch time by how long the slide stays active (TikTok embeds
   // don't expose reliable play/progress events).
@@ -267,20 +236,16 @@ function TikTokPlayer({ video, active, onReport, onUnavailable }) {
     };
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Official TikTok embed iframe — works for any public video id, no oEmbed
+  // fetch, no CORS. Only mounted when the slide is near view (parent lazy-loads).
   return (
     <div className="player-wrap">
-      {html ? (
-        <div
-          style={{ width: "100%", height: "100%", overflow: "hidden" }}
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
-      ) : (
-        <div
-          className="thumb-fallback"
-          style={{ backgroundImage: `url(${video.thumbnail})` }}
-          data-tiktok-id={rawId}
-        />
-      )}
+      <iframe
+        className="player-el"
+        src={`https://www.tiktok.com/embed/v2/${rawId}?lang=en&autoplay=${active ? 1 : 0}&music_info=0&description=0`}
+        allow="autoplay; encrypted-media; fullscreen"
+        title={video.title}
+      />
     </div>
   );
 }
