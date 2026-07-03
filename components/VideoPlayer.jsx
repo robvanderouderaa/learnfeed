@@ -235,7 +235,8 @@ function TikTokPlayer({ video, active, muted, onReport }) {
       setTimeout(() => {
         if (active) {
           ttCmd(f, "play");
-          muted ? ttCmd(f, "mute") : (ttCmd(f, "unMute"), ttCmd(f, "setVolume", 1));
+          // TikTok volume is 0-100, not 0-1.
+          muted ? ttCmd(f, "mute") : (ttCmd(f, "unMute"), ttCmd(f, "setVolume", 100));
         } else {
           ttCmd(f, "mute");
           ttCmd(f, "pause");

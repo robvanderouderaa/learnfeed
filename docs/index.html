@@ -101,24 +101,32 @@ function ttCmd(iframe,type,value){
   if(!iframe||!iframe.contentWindow)return;
   const m={type,"x-tiktok-player":true};if(value!==undefined)m.value=value;
   try{iframe.contentWindow.postMessage(m,"*")}catch(e){}
-  try{iframe.contentWindow.postMessage(JSON.stringify(m),"*")}catch(e){}
 }
-// player takes a moment to be ready; retry the unmute a few times
+// player takes a moment to be ready; retry a few times. NOTE: TikTok volume
+// is 0-100 (not 0-1) — setVolume(1) would be ~silent, so use 100.
 function pushAudio(el){
   const f=el&&el.querySelector("iframe.embed");if(!f)return;
-  [200,700,1500,2600].forEach(t=>setTimeout(()=>{
+  [150,600,1400,2600].forEach(t=>setTimeout(()=>{
     if(el!==activeEl)return;
-    if(soundOn){ttCmd(f,"unMute");ttCmd(f,"setVolume",1);ttCmd(f,"play")}else{ttCmd(f,"mute")}
+    if(soundOn){ttCmd(f,"unMute");ttCmd(f,"setVolume",100);ttCmd(f,"play")}else{ttCmd(f,"mute")}
   },t));
 }
-function silence(el){const f=el&&el.querySelector("iframe.embed");if(f){ttCmd(f,"mute");ttCmd(f,"pause")}}
+// Hard-stop a slide's audio: pause AND remove the iframe so nothing keeps
+// playing off-screen. It re-mounts if scrolled back.
+function silence(el){
+  if(!el)return;const f=el.querySelector("iframe.embed");
+  if(f){ttCmd(f,"pause");ttCmd(f,"mute");f.remove();el._loaded=false;el._t0=null;}
+}
+function stopOthers(active){document.querySelectorAll(".slide").forEach(s=>{if(s!==active)silence(s)})}
+// Turn sound ON (explicit, not a toggle). Called by the sound button and by
+// tapping the video. Once on, it STAYS on and pushAudio unmutes every
+// subsequent in-view video automatically — so it's one tap for the session.
 function enableSound(){
-  if(soundOn)return;soundOn=true;
+  soundOn=true;
   document.querySelectorAll(".soundhint").forEach(h=>h.remove());
   document.querySelectorAll(".sound").forEach(b=>b.textContent="🔊");
   pushAudio(activeEl);
 }
-window.addEventListener("pointerdown",enableSound,{once:true});
 
 /* ---------- data ---------- */
 let FEED={};          // topic -> [videos]
@@ -207,7 +215,11 @@ function slide(v){
   el.appendChild(tap);
   // sound toggle (also serves as the "first gesture" to unlock audio)
   const sb=document.createElement("button");sb.className="sound";sb.textContent=soundOn?"🔊":"🔇";
-  sb.onclick=(e)=>{e.stopPropagation();soundOn=!soundOn;document.querySelectorAll(".sound").forEach(b=>b.textContent=soundOn?"🔊":"🔇");document.querySelectorAll(".soundhint").forEach(h=>h.remove());if(soundOn)pushAudio(activeEl);else silence(activeEl)};
+  sb.onclick=(e)=>{
+    e.stopPropagation();
+    if(soundOn){soundOn=false;const f=activeEl&&activeEl.querySelector("iframe.embed");if(f)ttCmd(f,"mute");document.querySelectorAll(".sound").forEach(b=>b.textContent="🔇");}
+    else{enableSound();} // turns on + unmutes the current video
+  };
   el.appendChild(sb);
   if(!soundOn){const hint=document.createElement("div");hint.className="soundhint";hint.textContent="tap for sound";el.appendChild(hint)}
   const ov=document.createElement("div");ov.className="overlay";
@@ -247,8 +259,9 @@ function observe(root){
   const obs=new IntersectionObserver(es=>{
     es.forEach(e=>{
       if(e.isIntersecting&&e.intersectionRatio>0.6){
-        if(activeEl&&activeEl!==e.target){silence(activeEl);finish(activeEl,false)}
+        if(activeEl&&activeEl!==e.target)finish(activeEl,false);
         activeEl=e.target;activeEl._reported=false;activeEl._watch=0;activeEl._t0=null;
+        stopOthers(activeEl);       // kill any other video's audio
         mount(activeEl,activeEl._v); // auto-load the video that's in view
         pushAudio(activeEl);        // unmute it if sound is enabled
       }
