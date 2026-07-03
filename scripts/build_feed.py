@@ -11,6 +11,7 @@ Usage: python scripts/build_feed.py
 import asyncio
 import json
 import os
+import subprocess
 import sys
 
 # interest -> TikTok search query (mirrors lib/interests.js)
@@ -21,11 +22,42 @@ INTERESTS = {
     "self-improvement": "productivity advice",
     "history": "history documentary short",
 }
-PER_TOPIC = 18
+PER_TOPIC = 8
 SEARCH_COUNT = 90          # over-fetch, filtering throws a lot away
 MIN_LIKES = 1000           # user requirement: no low-engagement clips
-MAX_DURATION = 180         # short-form-ish; real educational clips run 1-3 min
-OUT = os.path.join(os.path.dirname(__file__), "..", "docs", "feed.json")
+MAX_DURATION = 80          # keep clips short so the hosted files stay small
+HERE = os.path.dirname(__file__)
+OUT = os.path.join(HERE, "..", "docs", "feed.json")
+MEDIA_DIR = os.path.join(HERE, "..", "docs", "media")  # transcoded MP4s we host
+
+# Download each TikTok and transcode to a small, universally-playable H.264 MP4
+# so the site plays it in a native <video> (real mobile autoplay, no iframe).
+def encode_video(raw_bytes, vid_id):
+    os.makedirs(MEDIA_DIR, exist_ok=True)
+    out_path = os.path.join(MEDIA_DIR, f"{vid_id}.mp4")
+    if os.path.exists(out_path) and os.path.getsize(out_path) > 10000:
+        return f"media/{vid_id}.mp4"  # already have it (cache across runs)
+    tmp = os.path.join(MEDIA_DIR, f"{vid_id}.src")
+    with open(tmp, "wb") as f:
+        f.write(raw_bytes)
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", tmp,
+             "-c:v", "libx264", "-crf", "30", "-preset", "veryfast",
+             "-vf", "scale=-2:720", "-maxrate", "900k", "-bufsize", "1500k",
+             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "64k",
+             "-movflags", "+faststart", out_path],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"    ffmpeg fail {vid_id}: {e}", file=sys.stderr)
+        return None
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return f"media/{vid_id}.mp4" if os.path.exists(out_path) else None
 
 # Known low-effort / AI-slop faceless-channel author markers.
 SLOP_AUTHOR = ("motivat", "_facts", "facts_", "factss", "abstract_",
@@ -116,7 +148,19 @@ async def main():
                         if dur and dur > MAX_DURATION:
                             dropped["long"] += 1
                             continue
-                        vids.append(shape(topic, d))
+                        # Download + transcode now (need the video object here).
+                        # Only keep the clip if we got a playable local file.
+                        row = shape(topic, d)
+                        try:
+                            raw = await video.bytes()
+                            row["file"] = encode_video(raw, vid_id)
+                        except Exception as e:  # noqa: BLE001
+                            print(f"    download fail {vid_id}: {str(e)[:60]}", file=sys.stderr)
+                            row["file"] = None
+                        if not row["file"]:
+                            continue
+                        vids.append(row)
+                        print(f"    + {vid_id} ({len(vids)}/{PER_TOPIC})", file=sys.stderr)
                         if len(vids) >= PER_TOPIC:
                             break
                 except Exception as e:  # noqa: BLE001
@@ -137,14 +181,30 @@ async def main():
                 old = (json.load(f) or {}).get("topics", {})
         except Exception:  # noqa: BLE001
             old = {}
+    def has_media(v):
+        f = v.get("file")
+        return f and os.path.exists(os.path.join(HERE, "..", "docs", f))
+
     merged = {}
     for topic in INTERESTS:
-        byid = {v["id"]: v for v in old.get(topic, [])}
+        byid = {v["id"]: v for v in old.get(topic, []) if has_media(v)}
         for v in out.get(topic, []):
             byid[v["id"]] = v  # new data wins on refresh
-        rows = sorted(byid.values(), key=lambda v: v.get("likes", 0), reverse=True)[:PER_TOPIC]
+        rows = [v for v in byid.values() if has_media(v)]
+        rows.sort(key=lambda v: v.get("likes", 0), reverse=True)
+        rows = rows[:PER_TOPIC]
         merged[topic] = rows
         print(f"  {topic}: {len(rows)} after merge", file=sys.stderr)
+
+    # Remove orphaned media files no longer referenced by the feed.
+    keep = {os.path.basename(v["file"]) for vs in merged.values() for v in vs}
+    if os.path.isdir(MEDIA_DIR):
+        for fn in os.listdir(MEDIA_DIR):
+            if fn.endswith(".mp4") and fn not in keep:
+                try:
+                    os.remove(os.path.join(MEDIA_DIR, fn))
+                except OSError:
+                    pass
 
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump({"generated": True, "topics": merged}, f, ensure_ascii=False, indent=1)
