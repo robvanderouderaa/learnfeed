@@ -59,6 +59,21 @@
   .toggle::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:999px;background:#fff;transition:transform .15s}
   .toggle.on::after{transform:translateX(20px)}
   .muted{color:var(--muted);font-size:13px}
+  /* interest weight rows */
+  .irow{display:flex;align-items:center;gap:10px;padding:12px 12px;background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:8px}
+  .irow .info{min-width:96px}
+  .irow .info .nm{font-size:14px;font-weight:600;text-transform:capitalize}
+  .irow .info .wt{font-size:11px;color:var(--muted)}
+  .slider{flex:1;accent-color:var(--accent);height:22px}
+  .slider:disabled{opacity:.5}
+  .trend{font-size:12px;font-weight:800;width:16px;text-align:center}
+  .trend.up{color:var(--good)}
+  .trend.down{color:var(--accent)}
+  .lock{width:34px;height:34px;border-radius:9px;border:1px solid var(--border);background:#0f0f11;color:#fff;font-size:15px;flex:0 0 auto}
+  .lock.on{background:var(--accent);border-color:var(--accent)}
+  /* feed feedback toast */
+  .toast{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);z-index:9;background:rgba(0,0,0,.82);color:#fff;font-size:14px;font-weight:700;padding:9px 16px;border-radius:999px;white-space:nowrap;animation:toastfade 1.6s ease forwards;pointer-events:none}
+  @keyframes toastfade{0%{opacity:0;transform:translate(-50%,8px)}15%{opacity:1;transform:translate(-50%,0)}80%{opacity:1}100%{opacity:0}}
   .quizwrap{position:absolute;inset:0;z-index:40;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:20px}
   .quiz{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;width:100%}
   .quiz h3{margin:0 0 14px;font-size:17px;line-height:1.4}
@@ -87,15 +102,18 @@ const QUIZ={ // demo quiz bank (real app generates with Gemini). OFF by default.
 };
 
 /* ---------- state ---------- */
-const KEY="learnfeed.v2";
+const KEY="learnfeed.v3";
 const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch{return{}}};
 const save=()=>localStorage.setItem(KEY,JSON.stringify(state));
 let state=load();
 if(!state.interests){
-  state.interests=DEFAULTS.map(n=>({name:n,active:true,priority:1}));
+  // priority is a 0-100 "weight" that auto-moves on watch/skip and sets each
+  // topic's share of the feed. locked = pin the weight (feedback ignored).
+  state.interests=DEFAULTS.map(n=>({name:n,priority:50,locked:false,trend:null}));
   state.watched={};state.skipped={};state.streaks={};state.tagCounts={};
   state.rank=1000;state.quizEnabled=false;state.muted=true;save();
 }
+const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
 
 /* ---------- audio ----------
    Browsers block autoplay WITH sound for cross-origin iframes until the user
@@ -139,12 +157,21 @@ let FEED={};          // topic -> [videos]
 let ALL=[];           // flat list
 function videosFor(t){return FEED[t.toLowerCase()]||FEED[t]||[]}
 function tier(r){return r>=800?"Diamond":r>=600?"Platinum":r>=400?"Gold":r>=200?"Silver":"Bronze"}
-function adjust(name,d){const it=state.interests.find(i=>i.name===name);if(it)it.priority=Math.max(.1,Math.min(3,it.priority+d))}
-
-// weighted round-robin across active interests, hide watched/skipped
+// nudge a topic's weight (unless locked) and remember the direction for the UI
+function adjust(name,d,dir){
+  const it=state.interests.find(i=>i.name===name);
+  if(!it||it.locked)return false;
+  it.priority=Math.round(clamp(it.priority+d,0,100));
+  it.trend=dir;
+  return true;
+}
+// Divide the feed across topics IN PROPORTION to their weights: a topic with
+// twice the slider value gets ~twice as many videos. Weight 0 = excluded.
 function buildFeed(){
-  const active=state.interests.filter(i=>i.active);
-  const pools=active.map(it=>({it,rows:videosFor(it.name).filter(v=>!state.watched[v.id]&&!state.skipped[v.id]),idx:0})).filter(p=>p.rows.length);
+  const pools=state.interests
+    .filter(i=>i.priority>0)
+    .map(it=>({it,rows:videosFor(it.name).filter(v=>!state.watched[v.id]&&!state.skipped[v.id]),idx:0}))
+    .filter(p=>p.rows.length);
   if(!pools.length)return[];
   const credits=pools.map(()=>0),out=[];
   while(out.length<80){
@@ -154,24 +181,45 @@ function buildFeed(){
     let pick=-1;
     pools.forEach((p,i)=>{if(p.idx<p.rows.length&&(pick<0||credits[i]>credits[pick]))pick=i});
     if(pick<0)break;
-    credits[pick]-=1;out.push(pools[pick].rows[pools[pick].idx]);pools[pick].idx++;
+    credits[pick]-=100;out.push(pools[pick].rows[pools[pick].idx]);pools[pick].idx++;
   }
   return out;
+}
+// share % each active topic gets of the feed (for the settings display)
+function topicShares(){
+  const act=state.interests.filter(i=>i.priority>0);
+  const sum=act.reduce((s,i)=>s+i.priority,0)||1;
+  const m={};act.forEach(i=>m[i.name]=Math.round(i.priority/sum*100));return m;
 }
 
 /* ---------- personalization ---------- */
 function report(v,secs,ended){
   const dur=v.duration||30;
   const full=ended||secs>=Math.min(dur*0.6,10);
+  const it=state.interests.find(i=>i.name===v.topic);
   if(full){
-    state.watched[v.id]=1;adjust(v.topic,.15);state.streaks[v.topic]=0;
+    state.watched[v.id]=1;state.streaks[v.topic]=0;
     (v.tags||[]).concat([v.topic]).forEach(t=>{t=(t||"").toLowerCase();if(t)state.tagCounts[t]=(state.tagCounts[t]||0)+1});
+    const moved=adjust(v.topic,8,"up");
+    save();
+    toast(moved?`👍 more ${v.topic}`:`🔒 ${v.topic} locked`);
   }else if(secs<3){
     state.skipped[v.id]=1;
     state.streaks[v.topic]=(state.streaks[v.topic]||0)+1;
-    if(state.streaks[v.topic]>=3){adjust(v.topic,-.5);state.streaks[v.topic]=0}else adjust(v.topic,-.05);
+    const streak=state.streaks[v.topic];
+    const big=streak>=3; if(big)state.streaks[v.topic]=0;
+    const moved=adjust(v.topic,big?-20:-6,"down");
+    save();
+    toast(moved?(big?`👎👎 much less ${v.topic}`:`👎 less ${v.topic}`):`🔒 ${v.topic} locked`);
   }
-  save();
+}
+// brief on-feed feedback so signals are visible (not silent).
+let toastT=null;
+function toast(msg){
+  document.querySelectorAll(".toast").forEach(t=>t.remove());
+  const t=document.createElement("div");t.className="toast";t.textContent=msg;
+  (document.getElementById("app")||document.body).appendChild(t);
+  clearTimeout(toastT);toastT=setTimeout(()=>t.remove(),1600);
 }
 
 /* ---------- render ---------- */
@@ -315,17 +363,28 @@ function settingsSheet(){
   const h=document.createElement("h1");h.textContent="Settings";p.appendChild(h);
 
   const s1=sec("Your interests");
+  const intro=document.createElement("p");intro.className="muted";intro.style.margin="-4px 0 10px";
+  intro.textContent="Each slider is that topic's weight — it decides how much of your feed the topic gets, and auto-moves up when you watch, down when you skip. 🔒 locks a slider so feedback can't change it.";
+  s1.appendChild(intro);
+  const shares=topicShares();
   state.interests.forEach(it=>{
-    const r=document.createElement("div");r.className="row";
-    const n=videosFor(it.name).length;
-    r.innerHTML=`<div><div>${it.name}</div><small>${n} video${n===1?"":"s"} loaded</small></div>`;
-    const t=document.createElement("button");t.className="toggle"+(it.active?" on":"");
-    t.onclick=()=>{it.active=!it.active;save();refreshSheet(sh)};
-    r.appendChild(t);s1.appendChild(r);
+    const r=document.createElement("div");r.className="irow";
+    const share=shares[it.name]!=null?shares[it.name]+"% of feed":"off";
+    const arrow=it.trend==="up"?"▲":it.trend==="down"?"▼":"·";
+    r.innerHTML=`<div class="info"><div class="nm">${esc(it.name)}</div><div class="wt">${share}</div></div>`
+      +`<span class="trend ${it.trend||''}">${arrow}</span>`;
+    const sl=document.createElement("input");sl.type="range";sl.min="0";sl.max="100";sl.step="1";sl.value=it.priority;sl.className="slider";sl.disabled=!!it.locked;
+    sl.oninput=()=>{it.priority=+sl.value;it.trend=null;save();};
+    sl.onchange=()=>refreshSheet(sh); // re-render shares after drag
+    r.appendChild(sl);
+    const lk=document.createElement("button");lk.className="lock"+(it.locked?" on":"");lk.textContent=it.locked?"🔒":"🔓";lk.title=it.locked?"Locked — feedback won't change this":"Unlocked — moves with watch/skip";
+    lk.onclick=()=>{it.locked=!it.locked;save();refreshSheet(sh)};
+    r.appendChild(lk);
+    s1.appendChild(r);
   });
   const add=document.createElement("div");add.className="inline";add.innerHTML=`<input placeholder="Add a topic…">`;
   const ab=document.createElement("button");ab.className="btn sec";ab.textContent="Add";
-  const addFn=()=>{const val=add.querySelector("input").value.trim().toLowerCase();if(val&&!state.interests.find(i=>i.name===val)){state.interests.push({name:val,active:true,priority:1});save();refreshSheet(sh)}};
+  const addFn=()=>{const val=add.querySelector("input").value.trim().toLowerCase();if(val&&!state.interests.find(i=>i.name===val)){state.interests.push({name:val,priority:50,locked:false,trend:null});save();refreshSheet(sh)}};
   ab.onclick=addFn;add.querySelector("input").onkeydown=e=>{if(e.key==="Enter")addFn()};
   add.appendChild(ab);s1.appendChild(add);
   const note=document.createElement("p");note.className="muted";note.style.marginTop="8px";
@@ -338,7 +397,7 @@ function settingsSheet(){
     const s2=sec("Suggested for you");
     const nt=document.createElement("p");nt.className="muted";nt.style.margin="-4px 0 8px";nt.textContent="Tags you watch a lot but haven't added.";s2.appendChild(nt);
     const chips=document.createElement("div");chips.className="chips";
-    sug.forEach(([k,c])=>{const ch=document.createElement("button");ch.className="chip";ch.textContent="+ "+k+" ("+c+")";ch.onclick=()=>{state.interests.push({name:k,active:true,priority:1});save();refreshSheet(sh)};chips.appendChild(ch)});
+    sug.forEach(([k,c])=>{const ch=document.createElement("button");ch.className="chip";ch.textContent="+ "+k+" ("+c+")";ch.onclick=()=>{state.interests.push({name:k,priority:50,locked:false,trend:null});save();refreshSheet(sh)};chips.appendChild(ch)});
     s2.appendChild(chips);p.appendChild(s2);
   }
 
