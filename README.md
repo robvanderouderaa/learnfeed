@@ -1,5 +1,9 @@
 # LearnFeed
 
+**🔴 Live demo:** https://robvanderouderaa.github.io/learnfeed/ — runs entirely
+in your browser (localStorage + built-in demo clips), no setup. Source in
+[`docs/`](docs/). The full server app (below) adds real TikTok/YouTube/Gemini.
+
 A personal, single-user short-form feed for **educational** content — a
 Shorts/TikTok-style vertical swipe feed of sub-60s videos across the topics you
 care about, with a retention-quiz system fully built but **disabled by default**.
