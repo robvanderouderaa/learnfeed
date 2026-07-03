@@ -11,7 +11,10 @@
   html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overscroll-behavior:none}
   button{font:inherit;cursor:pointer}
   a{color:inherit}
-  #app{height:100dvh;width:100%;max-width:480px;margin:0 auto;position:relative;background:#000;overflow:hidden}
+  /* Keep the column narrow: at ~480px+ TikTok's player switches to its
+     cluttered desktop layout (like/share sidebar). ~420 keeps the clean
+     mobile player. */
+  #app{height:100dvh;width:100%;max-width:420px;margin:0 auto;position:relative;background:#000;overflow:hidden}
   .feed{height:100dvh;overflow-y:scroll;scroll-snap-type:y mandatory;scrollbar-width:none}
   .feed::-webkit-scrollbar{display:none}
   .slide{height:100dvh;scroll-snap-align:start;scroll-snap-stop:always;position:relative;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden}
@@ -28,7 +31,10 @@
   .sound{position:absolute;top:56px;right:14px;z-index:6;width:44px;height:44px;border-radius:999px;border:none;background:rgba(0,0,0,.6);color:#fff;font-size:19px;display:flex;align-items:center;justify-content:center}
   .soundhint{position:absolute;top:108px;right:14px;z-index:6;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:600;padding:6px 10px;border-radius:8px}
   .badge{position:absolute;top:14px;left:14px;z-index:3;font-size:11px;font-weight:800;padding:3px 8px;border-radius:999px;background:rgba(0,0,0,.55);text-transform:uppercase}
-  .topbar{position:absolute;top:0;left:0;right:0;z-index:10;display:flex;gap:8px;padding:10px 12px}
+  .searchbar{position:absolute;top:0;left:0;right:0;z-index:12;display:flex;gap:8px;padding:10px 12px}
+  /* controls live in a vertical stack on the lower-right — the clear zone in
+     TikTok's mobile player (author is top-left, caption bottom-left). */
+  .controls{position:absolute;right:10px;bottom:104px;z-index:11;display:flex;flex-direction:column;gap:10px}
   .search{flex:1;background:rgba(0,0,0,.6);border:1px solid var(--border);color:#fff;border-radius:999px;padding:9px 14px;font-size:14px;outline:none}
   .iconbtn{background:rgba(0,0,0,.6);border:1px solid var(--border);color:#fff;border-radius:999px;width:40px;height:40px;font-size:18px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
   .center{height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:28px}
@@ -170,7 +176,23 @@ function report(v,secs,ended){
 
 /* ---------- render ---------- */
 const app=document.getElementById("app");
-let feedList=[],searchMode=false,quizState=null,searchQuery="",searchT=null;
+let feedList=[],searchMode=false,quizState=null,searchQuery="",searchT=null,searchOpen=false;
+
+// Keyboard navigation: arrow up/down (also PageUp/Down, Space) to move between
+// videos, mirroring the scroll-snap feed.
+document.addEventListener("keydown",e=>{
+  const ae=document.activeElement;
+  if(ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA"))return; // don't hijack search typing
+  if(e.key==="ArrowDown"||e.key==="PageDown"||e.key===" "){e.preventDefault();navSlide(1);}
+  else if(e.key==="ArrowUp"||e.key==="PageUp"){e.preventDefault();navSlide(-1);}
+});
+function navSlide(dir){
+  const feed=document.querySelector(".feed");if(!feed)return;
+  const slides=[...feed.querySelectorAll(".slide")];
+  let idx=slides.indexOf(activeEl);if(idx<0)idx=0;
+  const t=slides[Math.max(0,Math.min(slides.length-1,idx+dir))];
+  if(t)t.scrollIntoView({behavior:"smooth"});
+}
 
 function render(){
   const list=searchMode?feedList:buildFeed();
@@ -185,16 +207,32 @@ function render(){
   observe(feedEl);
 }
 
+// Minimal top-right control cluster. TikTok's player already shows author,
+// caption, likes and the like/share sidebar — so we DON'T duplicate any of
+// that; we only add search, sound and settings, plus a collapsible search box.
 function topbar(){
-  const bar=document.createElement("div");bar.className="topbar";
-  const s=document.createElement("input");s.className="search";s.placeholder="Search these videos…";s.value=searchQuery;
-  s.oninput=e=>{searchQuery=e.target.value;clearTimeout(searchT);searchT=setTimeout(runSearch,350)};
-  bar.appendChild(s);
-  if(searchMode){const x=document.createElement("button");x.className="iconbtn";x.textContent="✕";x.onclick=()=>{searchMode=false;searchQuery="";render()};bar.appendChild(x)}
-  const g=document.createElement("button");g.className="iconbtn";g.textContent="⚙";
-  g.onclick=()=>document.querySelector(".sheet").classList.add("open");
-  bar.appendChild(g);return bar;
+  if(searchOpen||searchMode){
+    const bar=document.createElement("div");bar.className="searchbar";
+    const s=document.createElement("input");s.className="search";s.placeholder="Search these videos…";s.value=searchQuery;
+    s.oninput=e=>{searchQuery=e.target.value;clearTimeout(searchT);searchT=setTimeout(runSearch,350)};
+    bar.appendChild(s);
+    const x=document.createElement("button");x.className="iconbtn";x.textContent="✕";
+    x.onclick=()=>{searchOpen=false;searchMode=false;searchQuery="";render()};
+    bar.appendChild(x);
+    setTimeout(()=>s.focus(),0);
+    return bar;
+  }
+  const c=document.createElement("div");c.className="controls";
+  const search=iconBtn("🔍",()=>{searchOpen=true;render()});
+  const snd=iconBtn(soundOn?"🔊":"🔇",()=>{
+    if(soundOn){soundOn=false;const f=activeEl&&activeEl.querySelector("iframe.embed");if(f)ttCmd(f,"mute");render();}
+    else{enableSound();render();}
+  });
+  const gear=iconBtn("⚙",()=>document.querySelector(".sheet").classList.add("open"));
+  c.append(search,snd,gear);
+  return c;
 }
+function iconBtn(txt,fn){const b=document.createElement("button");b.className="iconbtn";b.textContent=txt;b.onclick=fn;return b}
 function runSearch(){
   const q=searchQuery.trim().toLowerCase();
   if(q.length<3){if(searchMode&&q.length===0){searchMode=false;render()}return}
@@ -204,31 +242,18 @@ function runSearch(){
 }
 
 // Lazily mount the real TikTok embed iframe; show cover art until then.
+// Deliberately minimal chrome — only a small topic pill — so we never fight
+// TikTok's own player UI (author/caption/likes/share are all shown by it).
 function slide(v){
   const el=document.createElement("div");el.className="slide";el.dataset.id=v.id;
   el._v=v;el._t0=null;el._watch=0;el._reported=false;el._loaded=false;
   if(v.cover){const c=document.createElement("div");c.className="cover";c.style.backgroundImage=`url(${v.cover})`;el.appendChild(c)}
-  const badge=document.createElement("span");badge.className="badge";badge.textContent="tiktok";el.appendChild(badge);
   const tap=document.createElement("div");tap.className="tapplay";
-  tap.innerHTML=`<div class="play">▶</div><div class="muted" style="color:#fff">Tap to play</div>`;
+  tap.innerHTML=`<div class="play">▶</div>`;
   tap.onclick=()=>{mount(el,v);enableSound()};
   el.appendChild(tap);
-  // sound toggle (also serves as the "first gesture" to unlock audio)
-  const sb=document.createElement("button");sb.className="sound";sb.textContent=soundOn?"🔊":"🔇";
-  sb.onclick=(e)=>{
-    e.stopPropagation();
-    if(soundOn){soundOn=false;const f=activeEl&&activeEl.querySelector("iframe.embed");if(f)ttCmd(f,"mute");document.querySelectorAll(".sound").forEach(b=>b.textContent="🔇");}
-    else{enableSound();} // turns on + unmutes the current video
-  };
-  el.appendChild(sb);
-  if(!soundOn){const hint=document.createElement("div");hint.className="soundhint";hint.textContent="tap for sound";el.appendChild(hint)}
-  const ov=document.createElement("div");ov.className="overlay";
-  const likes=v.likes?`<div class="likes"><span>♥</span> ${fmt(v.likes)} likes</div>`:"";
-  ov.innerHTML=`<span class="topic">${v.topic}</span><p class="title">${esc(v.title)}</p><div class="author">@${esc(v.author||"")}</div>${likes}`;
-  el.appendChild(ov);
   return el;
 }
-function fmt(n){return n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(1)+"K":""+n}
 function mount(el,v){
   if(el._loaded)return;el._loaded=true;
   const tap=el.querySelector(".tapplay");if(tap)tap.remove();
