@@ -273,8 +273,10 @@ function topbar(){
   const c=document.createElement("div");c.className="controls";
   const search=iconBtn("🔍",()=>{searchOpen=true;render()});
   const snd=iconBtn(soundOn?"🔊":"🔇",()=>{
-    if(soundOn){soundOn=false;const f=activeEl&&activeEl.querySelector("iframe.embed");if(f)ttCmd(f,"mute");render();}
-    else{enableSound();render();}
+    // toggle audio WITHOUT re-rendering (that would restart the current video)
+    if(soundOn){soundOn=false;const f=activeEl&&activeEl.querySelector("iframe.embed");if(f)ttCmd(f,"mute");}
+    else{enableSound();}
+    snd.textContent=soundOn?"🔊":"🔇";
   });
   const gear=iconBtn("⚙",()=>document.querySelector(".sheet").classList.add("open"));
   c.append(search,snd,gear);
@@ -294,7 +296,7 @@ function runSearch(){
 // TikTok's own player UI (author/caption/likes/share are all shown by it).
 function slide(v){
   const el=document.createElement("div");el.className="slide";el.dataset.id=v.id;
-  el._v=v;el._t0=null;el._watch=0;el._reported=false;el._loaded=false;
+  el._v=v;el._ct=0;el._dur=v.duration||0;el._ended=false;el._reported=false;el._loaded=false;
   if(v.cover){const c=document.createElement("div");c.className="cover";c.style.backgroundImage=`url(${v.cover})`;el.appendChild(c)}
   const tap=document.createElement("div");tap.className="tapplay";
   tap.innerHTML=`<div class="play">▶</div>`;
@@ -309,16 +311,30 @@ function mount(el,v){
   // player/v1 = clean full-bleed vertical player (no "related videos"/watch-now).
   f.src=`https://www.tiktok.com/player/v1/${v.id}?autoplay=1&loop=1&controls=1&music_info=0&description=0&rel=0&native_context_menu=0&closed_caption=0`;
   el.appendChild(f);
-  el._t0=Date.now();
   if(el===activeEl)pushAudio(el);
 }
 function esc(s){return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 
+// Track REAL playback via the player's onCurrentTime/onStateChange events, so
+// watch/skip signals reflect what actually played — not just time on screen.
+window.addEventListener("message",e=>{
+  const d=e.data;if(!d||d["x-tiktok-player"]!==true||!activeEl)return;
+  const f=activeEl.querySelector("iframe.embed");
+  if(!f||e.source!==f.contentWindow)return;
+  if(d.type==="onCurrentTime"&&d.value){
+    activeEl._ct=Math.max(activeEl._ct||0,d.value.currentTime||0);
+    if(d.value.duration)activeEl._dur=d.value.duration;
+  }else if(d.type==="onStateChange"&&d.value===0){
+    activeEl._ended=true;
+  }
+});
+
 function finish(el,ended){
   if(el._reported)return;el._reported=true;
-  if(el._t0)el._watch+=(Date.now()-el._t0)/1000;el._t0=null;
-  report(el._v,Math.round(el._watch),ended);
-  if(ended)maybeQuiz(el._v);
+  const secs=Math.round(el._ct||0);
+  const done=ended||el._ended||(el._dur>0&&el._ct>=el._dur*0.9);
+  report(el._v,secs,done);
+  if(done)maybeQuiz(el._v);
 }
 function maybeQuiz(v){
   if(!state.quizEnabled)return;
@@ -333,7 +349,7 @@ function observe(root){
     es.forEach(e=>{
       if(e.isIntersecting&&e.intersectionRatio>0.6){
         if(activeEl&&activeEl!==e.target)finish(activeEl,false);
-        activeEl=e.target;activeEl._reported=false;activeEl._watch=0;activeEl._t0=null;
+        activeEl=e.target;activeEl._reported=false;activeEl._ct=0;activeEl._ended=false;
         stopOthers(activeEl);       // kill any other video's audio
         mount(activeEl,activeEl._v); // auto-load the video that's in view
         pushAudio(activeEl);        // unmute it if sound is enabled
@@ -415,7 +431,9 @@ function settingsSheet(){
   p.appendChild(foot);
   sh.appendChild(p);return sh;
 }
-function refreshSheet(oldSh){const open=oldSh.classList.contains("open");render();if(open)document.querySelector(".sheet").classList.add("open")}
+// Rebuild ONLY the settings panel in place — never re-render the feed (that
+// would restart the current video and jump you back to the top).
+function refreshSheet(oldSh){const open=oldSh.classList.contains("open");const fresh=settingsSheet();if(open)fresh.classList.add("open");oldSh.replaceWith(fresh);}
 function sec(t){const s=document.createElement("div");s.className="sec";const h=document.createElement("h3");h.textContent=t;s.appendChild(h);return s}
 
 /* ---------- quiz ---------- */
