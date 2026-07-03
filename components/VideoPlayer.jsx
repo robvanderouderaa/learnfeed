@@ -242,8 +242,8 @@ function TikTokPlayer({ video, active, onReport }) {
     <div className="player-wrap">
       <iframe
         className="player-el"
-        src={`https://www.tiktok.com/embed/v2/${rawId}?lang=en&autoplay=${active ? 1 : 0}&music_info=0&description=0`}
-        allow="autoplay; encrypted-media; fullscreen"
+        src={`https://www.tiktok.com/player/v1/${rawId}?autoplay=${active ? 1 : 0}&loop=1&controls=1&music_info=0&description=0&rel=0&native_context_menu=0&closed_caption=0`}
+        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
         title={video.title}
       />
     </div>

@@ -180,8 +180,9 @@ function slide(v){
 function mount(el,v){
   if(el._loaded)return;el._loaded=true;
   const tap=el.querySelector(".tapplay");if(tap)tap.remove();
-  const f=document.createElement("iframe");f.className="embed";f.allow="autoplay; encrypted-media; fullscreen";
-  f.src=`https://www.tiktok.com/embed/v2/${v.id}?lang=en&autoplay=1&music_info=0&description=0`;
+  const f=document.createElement("iframe");f.className="embed";f.allow="autoplay; encrypted-media; fullscreen; picture-in-picture";
+  // player/v1 = clean full-bleed vertical player (no "related videos"/watch-now).
+  f.src=`https://www.tiktok.com/player/v1/${v.id}?autoplay=1&loop=1&controls=1&music_info=0&description=0&rel=0&native_context_menu=0&closed_caption=0`;
   el.appendChild(f);
   el._t0=Date.now();
 }
