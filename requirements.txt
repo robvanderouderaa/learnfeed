@@ -1,0 +1,5 @@
+# Optional — only needed for the TikTok-first video source.
+# Without these, the app silently falls back to YouTube for everything.
+TikTokApi>=6.0.0
+# TikTokApi drives a headless browser; install its runtime once:
+#   python -m playwright install chromium

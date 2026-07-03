@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>LearnFeed</title>
+<meta name="description" content="A personal short-form feed for educational content." />
+<style>
+  :root{--bg:#000;--fg:#fff;--muted:#a1a1aa;--accent:#ff2d55;--card:#18181b;--border:#27272a;--good:#34c759}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overscroll-behavior:none}
+  button{font:inherit;cursor:pointer}
+  a{color:inherit}
+  #app{height:100dvh;width:100%;max-width:480px;margin:0 auto;position:relative;background:#000;overflow:hidden}
+  .feed{height:100dvh;overflow-y:scroll;scroll-snap-type:y mandatory;scrollbar-width:none}
+  .feed::-webkit-scrollbar{display:none}
+  .slide{height:100dvh;scroll-snap-align:start;scroll-snap-stop:always;position:relative;display:flex;align-items:center;justify-content:center;background:#000}
+  .slide video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+  .overlay{position:absolute;left:0;right:0;bottom:0;padding:16px 16px 30px;background:linear-gradient(transparent,rgba(0,0,0,.78));z-index:2;pointer-events:none}
+  .topic{display:inline-block;font-size:12px;color:var(--accent);font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+  .title{margin:6px 0 0;font-size:16px;line-height:1.35;font-weight:600}
+  .badge{position:absolute;top:14px;left:14px;z-index:3;font-size:11px;font-weight:800;padding:3px 8px;border-radius:999px;background:rgba(0,0,0,.55);text-transform:uppercase}
+  .mute{position:absolute;top:12px;right:14px;z-index:3;width:40px;height:40px;border-radius:999px;border:none;background:rgba(0,0,0,.55);color:#fff;font-size:18px}
+  .topbar{position:absolute;top:0;left:0;right:0;z-index:10;display:flex;gap:8px;padding:10px 12px}
+  .search{flex:1;background:rgba(0,0,0,.55);border:1px solid var(--border);color:#fff;border-radius:999px;padding:9px 14px;font-size:14px;outline:none}
+  .iconbtn{background:rgba(0,0,0,.55);border:1px solid var(--border);color:#fff;border-radius:999px;width:40px;height:40px;font-size:18px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .center{height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:28px}
+  .center h2{margin:0;font-size:20px}
+  .center p{color:var(--muted);margin:0;max-width:300px}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:11px 18px;font-weight:700;font-size:15px}
+  .btn.sec{background:var(--card);border:1px solid var(--border)}
+  .sheet{position:absolute;inset:0;z-index:20;background:#0a0a0b;overflow-y:auto;transform:translateX(100%);transition:transform .2s ease}
+  .sheet.open{transform:none}
+  .page{padding:18px 16px 60px}
+  .page h1{font-size:22px;margin:6px 0 18px}
+  .sec{margin-bottom:26px}
+  .sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:8px}
+  .row small{color:var(--muted);font-size:12px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{padding:9px 13px;border-radius:999px;border:1px solid var(--border);background:var(--card);font-size:14px;color:#fff}
+  .chip.on{background:var(--accent);border-color:var(--accent)}
+  .inline{display:flex;gap:8px;margin-top:8px}
+  .inline input{flex:1;background:var(--card);border:1px solid var(--border);color:#fff;border-radius:10px;padding:10px 12px;outline:none}
+  .toggle{width:46px;height:26px;border-radius:999px;background:#3f3f46;border:none;position:relative;flex:0 0 auto}
+  .toggle.on{background:var(--good)}
+  .toggle::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:999px;background:#fff;transition:transform .15s}
+  .toggle.on::after{transform:translateX(20px)}
+  .muted{color:var(--muted);font-size:13px}
+  .quizwrap{position:absolute;inset:0;z-index:40;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:20px}
+  .quiz{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;width:100%}
+  .quiz h3{margin:0 0 14px;font-size:17px;line-height:1.4}
+  .qc{display:block;width:100%;text-align:left;padding:13px;border-radius:10px;border:1px solid var(--border);background:#0f0f11;color:#fff;margin-bottom:8px;font-size:14px}
+  .qc.correct{border-color:var(--good);background:rgba(52,199,89,.15)}
+  .qc.wrong{border-color:var(--accent);background:rgba(255,45,85,.15)}
+  .demoflag{position:absolute;bottom:88px;left:16px;z-index:2;font-size:11px;color:var(--muted);background:rgba(0,0,0,.4);padding:3px 8px;border-radius:6px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ============================================================
+   LearnFeed — static client-only demo (GitHub Pages).
+   Mirrors the full app's UX & personalization, backed by
+   localStorage + a built-in demo video catalog. The full
+   Next.js + SQLite + TikTok/YouTube/Gemini app lives in the repo.
+   ============================================================ */
+
+const CLIPS = [
+  "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+  "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+  "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+  "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+  "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4",
+];
+
+const BLURBS = {
+  psychology:["Why your brain craves closure","The spotlight effect, explained","Why we remember beginnings and endings","The psychology of first impressions","How habits actually form"],
+  science:["Why the sky is blue","How black holes bend time","What entropy really means","Why ice floats on water","How mRNA vaccines work"],
+  tech:["How HTTPS keeps you safe","What happens when you type a URL","Why RAM is faster than disk","How compression shrinks files","What a hash function does"],
+  "self-improvement":["The 2-minute rule for habits","Why deep work beats multitasking","Beating the planning fallacy","The power of tiny wins","Why sleep is a productivity tool"],
+  history:["How paper changed the world","The library of Alexandria","Why Rome really fell","The printing press revolution","How spices shaped trade"],
+};
+const DEFAULTS = ["psychology","science","tech","self-improvement","history"];
+// Demo quiz bank (the real app generates these with Gemini). Kept OFF by default.
+const QUIZ = {
+  "psychology-0":{q:"The spotlight effect is the tendency to…",a:["overestimate how much others notice us","see better in bright light","focus only on one task","remember spotlit events"],c:0},
+  "science-0":{q:"The sky looks blue mainly because of…",a:["reflection off the ocean","Rayleigh scattering of sunlight","blue gases in the air","the ozone layer"],c:1},
+};
+
+/* ---------- state (localStorage) ---------- */
+const KEY="learnfeed.v1";
+const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch{return{}}};
+const save=()=>localStorage.setItem(KEY,JSON.stringify(state));
+let state=load();
+if(!state.interests){
+  state.interests=DEFAULTS.map(n=>({name:n,active:true,priority:1}));
+  state.watched={}; state.skipped={}; state.streaks={}; state.tagCounts={};
+  state.rank=1000; state.quizEnabled=false; state.muted=true;
+  save();
+}
+state.muted = state.muted!==false;
+
+/* ---------- demo catalog ---------- */
+function blurbs(t){return BLURBS[t.toLowerCase()]||[t+": a quick fact",t+" in 60 seconds","The truth about "+t,t+", explained",t+" — one key idea"]}
+function videosFor(topic){
+  const b=blurbs(topic), out=[];
+  for(let i=0;i<b.length;i++){
+    const id=topic.toLowerCase().replace(/[^a-z0-9]+/g,"-")+"-"+i;
+    out.push({id,source:"demo",topic,title:b[i],url:CLIPS[i%CLIPS.length]});
+  }
+  return out;
+}
+// weighted round-robin across active interests, hiding watched/skipped
+function buildFeed(){
+  const active=state.interests.filter(i=>i.active);
+  const pools=active.map(it=>({it,rows:videosFor(it.name).filter(v=>!state.watched[v.id]&&!state.skipped[v.id]),idx:0})).filter(p=>p.rows.length);
+  if(!pools.length) return [];
+  const credits=pools.map(()=>0), out=[];
+  while(out.length<60){
+    let any=false;
+    pools.forEach((p,i)=>{if(p.idx<p.rows.length){credits[i]+=p.it.priority;any=true}});
+    if(!any)break;
+    let pick=-1;
+    pools.forEach((p,i)=>{if(p.idx<p.rows.length&&(pick<0||credits[i]>credits[pick]))pick=i});
+    if(pick<0)break;
+    credits[pick]-=1; out.push(pools[pick].rows[pools[pick].idx]); pools[pick].idx++;
+  }
+  return out;
+}
+function tier(r){return r>=800?"Diamond":r>=600?"Platinum":r>=400?"Gold":r>=200?"Silver":"Bronze"}
+function adjust(name,d){const it=state.interests.find(i=>i.name===name);if(it)it.priority=Math.max(.1,Math.min(3,it.priority+d))}
+
+/* ---------- personalization signals ---------- */
+function report(v,secs,ended){
+  const full=ended||secs>=13; // ~15s clips
+  if(full){
+    state.watched[v.id]=1; adjust(v.topic,.15); state.streaks[v.topic]=0;
+    state.tagCounts[v.topic.toLowerCase()]=(state.tagCounts[v.topic.toLowerCase()]||0)+1;
+  } else if(secs<3){
+    state.skipped[v.id]=1;
+    state.streaks[v.topic]=(state.streaks[v.topic]||0)+1;
+    if(state.streaks[v.topic]>=3){adjust(v.topic,-.5);state.streaks[v.topic]=0}
+    else adjust(v.topic,-.05);
+  }
+  save();
+}
+
+/* ---------- render ---------- */
+const app=document.getElementById("app");
+let feed=[], searchMode=false, quizState=null;
+
+function render(){
+  const list = searchMode ? feed : buildFeed();
+  app.innerHTML="";
+  app.appendChild(topbar());
+  if(!list.length){ app.appendChild(emptyState()); app.appendChild(settingsSheet()); return; }
+  const feedEl=document.createElement("div"); feedEl.className="feed";
+  list.forEach(v=>feedEl.appendChild(slide(v)));
+  app.appendChild(feedEl);
+  app.appendChild(settingsSheet());
+  if(quizState) app.appendChild(quizModal());
+  observe(feedEl);
+}
+
+function topbar(){
+  const bar=document.createElement("div"); bar.className="topbar";
+  const s=document.createElement("input"); s.className="search"; s.placeholder="Search any topic…"; s.value=searchQuery;
+  s.oninput=e=>{searchQuery=e.target.value; clearTimeout(searchT); searchT=setTimeout(runSearch,400)};
+  bar.appendChild(s);
+  if(searchMode){const x=document.createElement("button");x.className="iconbtn";x.textContent="✕";x.onclick=()=>{searchMode=false;searchQuery="";render()};bar.appendChild(x)}
+  const g=document.createElement("button"); g.className="iconbtn"; g.textContent="⚙";
+  g.onclick=()=>document.querySelector(".sheet").classList.add("open");
+  bar.appendChild(g);
+  return bar;
+}
+let searchQuery="", searchT=null;
+function runSearch(){
+  const q=searchQuery.trim().toLowerCase();
+  if(q.length<3){ if(searchMode&&q.length===0){searchMode=false;render()} return }
+  const all=state.interests.flatMap(i=>videosFor(i.name))
+    .concat(DEFAULTS.flatMap(videosFor));
+  const seen=new Set(), res=[];
+  for(const v of all){ if(seen.has(v.id))continue; seen.add(v.id);
+    if((v.title+" "+v.topic).toLowerCase().includes(q)) res.push(v); }
+  feed = res.length?res:all.slice(0,10);
+  searchMode=true; render();
+}
+
+function slide(v){
+  const el=document.createElement("div"); el.className="slide"; el.dataset.id=v.id;
+  const vid=document.createElement("video");
+  vid.src=v.url; vid.playsInline=true; vid.muted=state.muted; vid.loop=false; vid.preload="metadata";
+  vid.dataset.id=v.id;
+  el._video=vid; el._watch=0; el._ended=false; el._reported=false;
+  vid.ontimeupdate=()=>{el._watch=vid.currentTime};
+  vid.onended=()=>{el._ended=true; finish(el,v,true)};
+  el.appendChild(vid);
+
+  const badge=document.createElement("span"); badge.className="badge"; badge.textContent=v.source; el.appendChild(badge);
+  const mute=document.createElement("button"); mute.className="mute"; mute.textContent=state.muted?"🔇":"🔊";
+  mute.onclick=()=>{state.muted=!state.muted; save(); document.querySelectorAll("video").forEach(x=>x.muted=state.muted); document.querySelectorAll(".mute").forEach(b=>b.textContent=state.muted?"🔇":"🔊")};
+  el.appendChild(mute);
+  const flag=document.createElement("div"); flag.className="demoflag"; flag.textContent="demo clip · add API keys for real videos"; el.appendChild(flag);
+  const ov=document.createElement("div"); ov.className="overlay";
+  ov.innerHTML=`<span class="topic">${v.topic}</span><p class="title">${v.title}</p>`;
+  el.appendChild(ov);
+  return el;
+}
+function finish(el,v,ended){
+  if(el._reported)return; el._reported=true;
+  report(v,Math.round(el._watch),ended);
+  if(ended) maybeQuiz(v);
+}
+function maybeQuiz(v){
+  if(!state.quizEnabled)return; // OFF by default
+  const total=Object.keys(state.watched).length;
+  if(total%5!==0)return; // ~ every few videos stands in for "every 5 min"
+  const q=QUIZ[v.id]; if(!q)return;
+  quizState={v,q,chosen:null}; render();
+}
+
+let activeEl=null;
+function observe(root){
+  const obs=new IntersectionObserver(es=>{
+    es.forEach(e=>{
+      if(e.isIntersecting&&e.intersectionRatio>0.6){
+        if(activeEl&&activeEl!==e.target){activeEl._video.pause();finish(activeEl,vOf(activeEl),false)}
+        activeEl=e.target; activeEl._reported=false; activeEl._watch=0; activeEl._ended=false;
+        activeEl._video.muted=state.muted; activeEl._video.play().catch(()=>{});
+      }
+    });
+  },{root,threshold:[0.6]});
+  root.querySelectorAll(".slide").forEach(s=>obs.observe(s));
+}
+function vOf(el){const id=el.dataset.id;return{id,topic:el.querySelector(".topic").textContent,title:el.querySelector(".title").textContent}}
+
+function emptyState(){
+  const d=document.createElement("div"); d.className="center";
+  d.innerHTML=`<h2>You're all caught up!</h2><p>No unwatched videos left for your active interests. Add more topics to keep learning.</p>`;
+  const b=document.createElement("button"); b.className="btn"; b.textContent="Add topics";
+  b.onclick=()=>document.querySelector(".sheet").classList.add("open");
+  d.appendChild(b); return d;
+}
+
+/* ---------- settings ---------- */
+function settingsSheet(){
+  const sh=document.createElement("div"); sh.className="sheet";
+  const p=document.createElement("div"); p.className="page";
+  const back=document.createElement("button"); back.className="muted"; back.style.cssText="background:none;border:none;margin-bottom:6px"; back.textContent="← Back to feed";
+  back.onclick=()=>{sh.classList.remove("open"); render()};
+  p.appendChild(back);
+  const h=document.createElement("h1"); h.textContent="Settings"; p.appendChild(h);
+
+  // interests
+  const s1=sec("Your interests");
+  state.interests.forEach(it=>{
+    const r=document.createElement("div"); r.className="row";
+    r.innerHTML=`<span>${it.name}</span>`;
+    const t=document.createElement("button"); t.className="toggle"+(it.active?" on":"");
+    t.onclick=()=>{it.active=!it.active; save(); s1.replaceWith(settingsSheet().querySelector(".sec")); };
+    r.appendChild(t); s1.appendChild(r);
+  });
+  const add=document.createElement("div"); add.className="inline";
+  add.innerHTML=`<input placeholder="Add a topic…">`;
+  const ab=document.createElement("button"); ab.className="btn sec"; ab.textContent="Add";
+  const addFn=()=>{const val=add.querySelector("input").value.trim().toLowerCase(); if(val&&!state.interests.find(i=>i.name===val)){state.interests.push({name:val,active:true,priority:1});save();sh.classList.remove("open");render();setTimeout(()=>document.querySelector(".sheet").classList.add("open"),0)}};
+  ab.onclick=addFn; add.querySelector("input").onkeydown=e=>{if(e.key==="Enter")addFn()};
+  add.appendChild(ab); s1.appendChild(add);
+  p.appendChild(s1);
+
+  // suggested
+  const sug=Object.entries(state.tagCounts||{}).filter(([k,c])=>c>=2&&!state.interests.find(i=>i.name===k)).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  if(sug.length){
+    const s2=sec("Suggested for you");
+    const note=document.createElement("p");note.className="muted";note.style.margin="-4px 0 8px";note.textContent="Topics you watch a lot but haven't added.";s2.appendChild(note);
+    const chips=document.createElement("div");chips.className="chips";
+    sug.forEach(([k,c])=>{const ch=document.createElement("button");ch.className="chip";ch.textContent="+ "+k+" ("+c+")";ch.onclick=()=>{state.interests.push({name:k,active:true,priority:1});save();sh.classList.remove("open");render();setTimeout(()=>document.querySelector(".sheet").classList.add("open"),0)};chips.appendChild(ch)});
+    s2.appendChild(chips); p.appendChild(s2);
+  }
+
+  // quiz
+  const s3=sec("Retention quiz");
+  const qr=document.createElement("div"); qr.className="row";
+  qr.innerHTML=`<div><div>Quiz mode</div><small>Pauses to quiz you. Off by default.</small></div>`;
+  const qt=document.createElement("button"); qt.className="toggle"+(state.quizEnabled?" on":"");
+  qt.onclick=()=>{state.quizEnabled=!state.quizEnabled;save();qt.classList.toggle("on")};
+  qr.appendChild(qt); s3.appendChild(qr);
+  const rk=document.createElement("p");rk.className="muted";rk.textContent="Rank "+state.rank+" · "+tier(state.rank);s3.appendChild(rk);
+  p.appendChild(s3);
+
+  const foot=document.createElement("p");foot.className="muted";foot.style.marginTop="30px";
+  foot.innerHTML='Static demo. Full app (Next.js + SQLite + TikTok/YouTube/Gemini) in the <a href="https://github.com/robvanderouderaa/learnfeed">repo</a>.';
+  p.appendChild(foot);
+  sh.appendChild(p); return sh;
+}
+function sec(title){const s=document.createElement("div");s.className="sec";const h=document.createElement("h3");h.textContent=title;s.appendChild(h);return s}
+
+/* ---------- quiz modal ---------- */
+function quizModal(){
+  const w=document.createElement("div"); w.className="quizwrap";
+  const c=document.createElement("div"); c.className="quiz";
+  c.innerHTML=`<div class="muted" style="margin-bottom:8px">Quick check</div><h3>${quizState.q.q}</h3>`;
+  quizState.q.a.forEach((choice,i)=>{
+    const b=document.createElement("button"); b.className="qc"; b.textContent=choice;
+    b.onclick=()=>{
+      if(quizState.chosen!=null)return; quizState.chosen=i;
+      const correct=i===quizState.q.c;
+      state.rank+=correct?15:-15; save();
+      [...c.querySelectorAll(".qc")].forEach((el,j)=>{if(j===quizState.q.c)el.classList.add("correct");else if(j===i)el.classList.add("wrong")});
+      const res=document.createElement("div"); res.style.marginTop="14px";
+      res.innerHTML=`<p style="margin:0 0 12px">${correct?"✅ Correct! +15":"❌ Not quite. −15"} · Rank ${state.rank} (${tier(state.rank)})</p>`;
+      const k=document.createElement("button"); k.className="btn"; k.textContent="Keep watching"; k.onclick=()=>{quizState=null;render()};
+      res.appendChild(k); c.appendChild(res);
+    };
+    c.appendChild(b);
+  });
+  w.appendChild(c); return w;
+}
+
+render();
+</script>
+</body>
+</html>

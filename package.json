@@ -1,0 +1,18 @@
+{
+  "name": "learnfeed",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "prefetch": "node scripts/run-prefetch.mjs",
+    "quota:reset": "node scripts/reset-quota.mjs"
+  },
+  "dependencies": {
+    "next": "^16.2.10",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  }
+}
