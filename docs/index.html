@@ -254,9 +254,8 @@ function render(){
   observe(feedEl);
 }
 
-// Minimal top-right control cluster. TikTok's player already shows author,
-// caption, likes and the like/share sidebar — so we DON'T duplicate any of
-// that; we only add search, sound and settings, plus a collapsible search box.
+// Minimal bottom-right control cluster (search, sound, settings) plus a
+// collapsible search box. Video info is shown in our own .overlay.
 function topbar(){
   if(searchOpen||searchMode){
     const bar=document.createElement("div");bar.className="searchbar";
@@ -282,6 +281,7 @@ function topbar(){
     else{enableSound();}
     snd.textContent=soundOn?"🔊":"🔇";
   });
+  snd.classList.add("sound"); // so enableSound() can update its icon
   const gear=iconBtn("⚙",()=>document.querySelector(".sheet").classList.add("open"));
   c.append(search,snd,gear);
   return c;
@@ -392,7 +392,9 @@ function settingsSheet(){
   const sh=document.createElement("div");sh.className="sheet";
   const p=document.createElement("div");p.className="page";
   const back=document.createElement("button");back.className="muted";back.style.cssText="background:none;border:none;margin-bottom:6px";back.textContent="← Back to feed";
-  back.onclick=()=>{sh.classList.remove("open");render()};p.appendChild(back);
+  // just hide the sheet — don't render() (that restarts the video). New weights
+  // take effect the next time the feed rebuilds.
+  back.onclick=()=>sh.classList.remove("open");p.appendChild(back);
   const h=document.createElement("h1");h.textContent="Settings";p.appendChild(h);
 
   const s1=sec("Your interests");
