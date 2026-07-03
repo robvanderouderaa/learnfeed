@@ -33,7 +33,7 @@ export default function VideoPlayer({ video, active, muted, onReport, onUnavaila
   if (video.source === "demo")
     return <DemoPlayer {...{ video, active, muted, onReport, onUnavailable }} />;
   if (video.source === "tiktok")
-    return <TikTokPlayer {...{ video, active, onReport, onUnavailable }} />;
+    return <TikTokPlayer {...{ video, active, muted, onReport, onUnavailable }} />;
   return <YouTubePlayer {...{ video, active, muted, onReport, onUnavailable }} />;
 }
 
@@ -210,11 +210,40 @@ function YouTubePlayer({ video, active, muted, onReport, onUnavailable }) {
   );
 }
 
-function TikTokPlayer({ video, active, onReport }) {
+// TikTok player/v1 embed API command (postMessage).
+function ttCmd(iframe, type, value) {
+  if (!iframe?.contentWindow) return;
+  const m = { type, "x-tiktok-player": true };
+  if (value !== undefined) m.value = value;
+  try { iframe.contentWindow.postMessage(m, "*"); } catch {}
+  try { iframe.contentWindow.postMessage(JSON.stringify(m), "*"); } catch {}
+}
+
+function TikTokPlayer({ video, active, muted, onReport }) {
   const startRef = useRef(null);
   const watchedRef = useRef(0);
+  const frameRef = useRef(null);
   const report = useReporter(onReport);
   const rawId = video.id.replace(/^tt_/, "");
+
+  // Drive play/pause + mute over the embed API as active/muted change. The
+  // player needs a beat to be ready, so retry the commands a few times.
+  useEffect(() => {
+    const f = frameRef.current;
+    if (!f) return;
+    const timers = [200, 800, 1800].map((t) =>
+      setTimeout(() => {
+        if (active) {
+          ttCmd(f, "play");
+          muted ? ttCmd(f, "mute") : (ttCmd(f, "unMute"), ttCmd(f, "setVolume", 1));
+        } else {
+          ttCmd(f, "mute");
+          ttCmd(f, "pause");
+        }
+      }, t)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [active, muted]);
 
   // Approximate watch time by how long the slide stays active (TikTok embeds
   // don't expose reliable play/progress events).
@@ -241,6 +270,7 @@ function TikTokPlayer({ video, active, onReport }) {
   return (
     <div className="player-wrap">
       <iframe
+        ref={frameRef}
         className="player-el"
         src={`https://www.tiktok.com/player/v1/${rawId}?autoplay=${active ? 1 : 0}&loop=1&controls=1&music_info=0&description=0&rel=0&native_context_menu=0&closed_caption=0`}
         allow="autoplay; encrypted-media; fullscreen; picture-in-picture"

@@ -19,10 +19,14 @@
   .embed{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
   .tapplay{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:#fff;background:rgba(0,0,0,.25)}
   .tapplay .play{width:64px;height:64px;border-radius:999px;background:rgba(255,255,255,.16);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;font-size:26px}
-  .overlay{position:absolute;left:0;right:0;bottom:0;padding:16px 16px 30px;background:linear-gradient(transparent,rgba(0,0,0,.82));z-index:2;pointer-events:none}
+  .overlay{position:absolute;left:0;right:0;bottom:52px;padding:16px 16px 12px;background:linear-gradient(transparent,rgba(0,0,0,.82));z-index:2;pointer-events:none}
   .topic{display:inline-block;font-size:12px;color:var(--accent);font-weight:800;text-transform:uppercase;letter-spacing:.04em}
   .title{margin:6px 0 4px;font-size:15px;line-height:1.35;font-weight:600;max-height:4.2em;overflow:hidden}
   .author{font-size:12px;color:var(--muted)}
+  .likes{font-size:12px;color:#fff;font-weight:700;margin-top:4px}
+  .likes span{color:var(--accent)}
+  .sound{position:absolute;top:56px;right:14px;z-index:6;width:44px;height:44px;border-radius:999px;border:none;background:rgba(0,0,0,.6);color:#fff;font-size:19px;display:flex;align-items:center;justify-content:center}
+  .soundhint{position:absolute;top:108px;right:14px;z-index:6;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:600;padding:6px 10px;border-radius:8px}
   .badge{position:absolute;top:14px;left:14px;z-index:3;font-size:11px;font-weight:800;padding:3px 8px;border-radius:999px;background:rgba(0,0,0,.55);text-transform:uppercase}
   .topbar{position:absolute;top:0;left:0;right:0;z-index:10;display:flex;gap:8px;padding:10px 12px}
   .search{flex:1;background:rgba(0,0,0,.6);border:1px solid var(--border);color:#fff;border-radius:999px;padding:9px 14px;font-size:14px;outline:none}
@@ -86,6 +90,35 @@ if(!state.interests){
   state.watched={};state.skipped={};state.streaks={};state.tagCounts={};
   state.rank=1000;state.quizEnabled=false;state.muted=true;save();
 }
+
+/* ---------- audio ----------
+   Browsers block autoplay WITH sound for cross-origin iframes until the user
+   interacts with the page once. So: autoplay muted, then on the first tap we
+   flip soundOn and drive the TikTok player/v1 embed API over postMessage
+   (unMute/play). After that, scrolling swaps audio to the in-view video. */
+let soundOn=false;
+function ttCmd(iframe,type,value){
+  if(!iframe||!iframe.contentWindow)return;
+  const m={type,"x-tiktok-player":true};if(value!==undefined)m.value=value;
+  try{iframe.contentWindow.postMessage(m,"*")}catch(e){}
+  try{iframe.contentWindow.postMessage(JSON.stringify(m),"*")}catch(e){}
+}
+// player takes a moment to be ready; retry the unmute a few times
+function pushAudio(el){
+  const f=el&&el.querySelector("iframe.embed");if(!f)return;
+  [200,700,1500,2600].forEach(t=>setTimeout(()=>{
+    if(el!==activeEl)return;
+    if(soundOn){ttCmd(f,"unMute");ttCmd(f,"setVolume",1);ttCmd(f,"play")}else{ttCmd(f,"mute")}
+  },t));
+}
+function silence(el){const f=el&&el.querySelector("iframe.embed");if(f){ttCmd(f,"mute");ttCmd(f,"pause")}}
+function enableSound(){
+  if(soundOn)return;soundOn=true;
+  document.querySelectorAll(".soundhint").forEach(h=>h.remove());
+  document.querySelectorAll(".sound").forEach(b=>b.textContent="🔊");
+  pushAudio(activeEl);
+}
+window.addEventListener("pointerdown",enableSound,{once:true});
 
 /* ---------- data ---------- */
 let FEED={};          // topic -> [videos]
@@ -170,13 +203,20 @@ function slide(v){
   const badge=document.createElement("span");badge.className="badge";badge.textContent="tiktok";el.appendChild(badge);
   const tap=document.createElement("div");tap.className="tapplay";
   tap.innerHTML=`<div class="play">▶</div><div class="muted" style="color:#fff">Tap to play</div>`;
-  tap.onclick=()=>mount(el,v);
+  tap.onclick=()=>{mount(el,v);enableSound()};
   el.appendChild(tap);
+  // sound toggle (also serves as the "first gesture" to unlock audio)
+  const sb=document.createElement("button");sb.className="sound";sb.textContent=soundOn?"🔊":"🔇";
+  sb.onclick=(e)=>{e.stopPropagation();soundOn=!soundOn;document.querySelectorAll(".sound").forEach(b=>b.textContent=soundOn?"🔊":"🔇");document.querySelectorAll(".soundhint").forEach(h=>h.remove());if(soundOn)pushAudio(activeEl);else silence(activeEl)};
+  el.appendChild(sb);
+  if(!soundOn){const hint=document.createElement("div");hint.className="soundhint";hint.textContent="tap for sound";el.appendChild(hint)}
   const ov=document.createElement("div");ov.className="overlay";
-  ov.innerHTML=`<span class="topic">${v.topic}</span><p class="title">${esc(v.title)}</p><div class="author">@${esc(v.author||"")}</div>`;
+  const likes=v.likes?`<div class="likes"><span>♥</span> ${fmt(v.likes)} likes</div>`:"";
+  ov.innerHTML=`<span class="topic">${v.topic}</span><p class="title">${esc(v.title)}</p><div class="author">@${esc(v.author||"")}</div>${likes}`;
   el.appendChild(ov);
   return el;
 }
+function fmt(n){return n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(1)+"K":""+n}
 function mount(el,v){
   if(el._loaded)return;el._loaded=true;
   const tap=el.querySelector(".tapplay");if(tap)tap.remove();
@@ -185,6 +225,7 @@ function mount(el,v){
   f.src=`https://www.tiktok.com/player/v1/${v.id}?autoplay=1&loop=1&controls=1&music_info=0&description=0&rel=0&native_context_menu=0&closed_caption=0`;
   el.appendChild(f);
   el._t0=Date.now();
+  if(el===activeEl)pushAudio(el);
 }
 function esc(s){return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 
@@ -206,9 +247,10 @@ function observe(root){
   const obs=new IntersectionObserver(es=>{
     es.forEach(e=>{
       if(e.isIntersecting&&e.intersectionRatio>0.6){
-        if(activeEl&&activeEl!==e.target)finish(activeEl,false);
+        if(activeEl&&activeEl!==e.target){silence(activeEl);finish(activeEl,false)}
         activeEl=e.target;activeEl._reported=false;activeEl._watch=0;activeEl._t0=null;
         mount(activeEl,activeEl._v); // auto-load the video that's in view
+        pushAudio(activeEl);        // unmute it if sound is enabled
       }
     });
   },{root,threshold:[0.6]});

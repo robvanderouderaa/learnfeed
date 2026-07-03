@@ -15,18 +15,54 @@ import sys
 
 # interest -> TikTok search query (mirrors lib/interests.js)
 INTERESTS = {
-    "psychology": "psychology facts",
-    "science": "science facts",
-    "tech": "technology explained",
-    "self-improvement": "self improvement tips",
-    "history": "history facts",
+    "psychology": "psychology explained",
+    "science": "science explained",
+    "tech": "how technology works",
+    "self-improvement": "productivity advice",
+    "history": "history documentary short",
 }
-PER_TOPIC = 12
+PER_TOPIC = 10
+SEARCH_COUNT = 60          # over-fetch, filtering throws a lot away
+MIN_LIKES = 1000           # user requirement: no low-engagement clips
+MAX_DURATION = 180         # short-form-ish; real educational clips run 1-3 min
 OUT = os.path.join(os.path.dirname(__file__), "..", "docs", "feed.json")
+
+# Known low-effort / AI-slop faceless-channel author markers.
+SLOP_AUTHOR = ("motivat", "_facts", "facts_", "factss", "abstract_",
+               "aivoice", "ai_", "_ai", "dailywisdom", "wisdom_",
+               "deepthought", "mindsetmotiv", "quotes_", "factoverload")
+SLOP_DESC = ("ai voice", "#ai ", "chatgpt", "ai generated", "#aivoice",
+             "text to speech", "generated with ai", "made with ai")
+
+
+def likes_of(d):
+    stats = d.get("stats") or {}
+    try:
+        return int(stats.get("diggCount") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def is_slop(d, author, desc):
+    # 1. TikTok's own AI-generated-content label
+    if (d.get("AIGCDescription") or "").strip():
+        return True
+    # 2. ads
+    if d.get("isAd"):
+        return True
+    # 3. faceless slop channels
+    a = author.lower()
+    if any(s in a for s in SLOP_AUTHOR):
+        return True
+    # 4. explicit AI markers in the caption
+    dl = desc.lower()
+    if any(s in dl for s in SLOP_DESC):
+        return True
+    return False
 
 
 def shape(topic, d):
-    stats = d.get("video", {}) or {}
+    vid = d.get("video", {}) or {}
     author = (d.get("author", {}) or {}).get("uniqueId", "u")
     return {
         "id": d.get("id"),
@@ -35,8 +71,9 @@ def shape(topic, d):
         "url": f"https://www.tiktok.com/@{author}/video/{d.get('id')}",
         "title": d.get("desc", ""),
         "author": author,
-        "cover": stats.get("cover") or stats.get("originCover"),
-        "duration": stats.get("duration"),
+        "likes": likes_of(d),
+        "cover": vid.get("cover") or vid.get("originCover"),
+        "duration": vid.get("duration"),
         "tags": [t.get("hashtagName") for t in d.get("textExtra", []) if t.get("hashtagName")],
     }
 
@@ -56,22 +93,33 @@ async def main():
         for topic, query in INTERESTS.items():
             vids = []
             seen = set()
+            dropped = {"slop": 0, "likes": 0, "long": 0}
             try:
-                async for video in api.search.search_type(query, "item", count=PER_TOPIC * 2):
+                async for video in api.search.search_type(query, "item", count=SEARCH_COUNT):
                     d = video.as_dict
-                    vid = shape(topic, d)
-                    if not vid["id"] or vid["id"] in seen:
+                    vid_id = d.get("id")
+                    if not vid_id or vid_id in seen:
                         continue
-                    # keep short-form only
-                    if vid["duration"] and vid["duration"] > 90:
+                    seen.add(vid_id)
+                    author = (d.get("author", {}) or {}).get("uniqueId", "u")
+                    desc = d.get("desc", "") or ""
+                    if is_slop(d, author, desc):
+                        dropped["slop"] += 1
                         continue
-                    seen.add(vid["id"])
-                    vids.append(vid)
+                    if likes_of(d) < MIN_LIKES:
+                        dropped["likes"] += 1
+                        continue
+                    dur = (d.get("video", {}) or {}).get("duration")
+                    if dur and dur > MAX_DURATION:
+                        dropped["long"] += 1
+                        continue
+                    vids.append(shape(topic, d))
                     if len(vids) >= PER_TOPIC:
                         break
             except Exception as e:  # noqa: BLE001
                 print(f"! {topic}: {e}", file=sys.stderr)
-            print(f"  {topic}: {len(vids)} videos", file=sys.stderr)
+            vids.sort(key=lambda v: v["likes"], reverse=True)
+            print(f"  {topic}: kept {len(vids)}  (dropped slop={dropped['slop']} lowlikes={dropped['likes']} long={dropped['long']})", file=sys.stderr)
             out[topic] = vids
 
     with open(OUT, "w", encoding="utf-8") as f:
